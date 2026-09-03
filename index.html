@@ -261,12 +261,12 @@
 
   <div class="section">
     <div class="slider-row">
-      <label>Liczba świateł <b id="countVal"></b></label>
-      <input type="range" id="countSlider" min="3" max="18" step="1">
+      <label><span id="countLabel">Liczba świateł</span> <b id="countVal"></b></label>
+      <input type="range" id="countSlider" min="3" max="30" step="1">
     </div>
     <div class="slider-row">
       <label>Prędkość ruchu <b id="speedVal"></b></label>
-      <input type="range" id="speedSlider" min="1" max="10" step="1">
+      <input type="range" id="speedSlider" min="0" max="2" step="0.1">
     </div>
     <div class="slider-row">
       <label>Rozmiar świateł <b id="sizeVal"></b></label>
@@ -329,7 +329,7 @@
     customColors: ["#ff7a3d","#ffd166","#8fd6c9","#c1b3ff"],
     shape: "spiky", // soft | spiky | ring | star | rain
     count: 7,
-    speed: 3,
+    speed: 1,
     size: 110,
     glow: 11,
     paused: false,
@@ -343,12 +343,12 @@
     {
       id:'bubbles', name:'Świetlne bąbelki', desc:'klasyczne, unoszące się światła',
       swatch: 'linear-gradient(135deg,#ff7a3d,#ffd166,#8fd6c9)',
-      apply: ()=>({ shape:'spiky', paletteIndex:0, useCustom:false, count:7, speed:3, size:110, glow:11 }),
+      apply: ()=>({ shape:'spiky', paletteIndex:0, useCustom:false, count:7, speed:1, size:110, glow:11 }),
     },
     {
       id:'rain', name:'Kolorowy deszcz', desc:'refleksy jak od kropli na szklanym suficie',
       swatch: 'linear-gradient(135deg,#34e5ff,#ff3fa4,#ffce54)',
-      apply: ()=>({ shape:'rain', paletteIndex:6, useCustom:false, count:10, speed:5, size:130, glow:14 }),
+      apply: ()=>({ shape:'rain', paletteIndex:6, useCustom:false, count:20, speed:1.2, size:130, glow:14 }),
     },
   ];
 
@@ -356,7 +356,7 @@
     Object.assign(state, scene.apply());
     ripples = [];
     makeLights();
-    renderPaletteGrid(); renderCustomToggle(); renderShapeGrid(); renderSceneGrid(); syncSliders();
+    renderPaletteGrid(); renderCustomToggle(); renderShapeGrid(); renderSceneGrid(); updateCountLabel(); syncSliders();
   }
 
   // ---------------------------------------------------------------
@@ -600,7 +600,7 @@
     const dt = Math.min(0.05, (now - t0)/1000);
     t0 = now;
     if(!state.paused){
-      elapsed += dt * (state.speed/4);
+      elapsed += dt * (state.speed/2);
     }
 
     const w = window.innerWidth, h = window.innerHeight;
@@ -611,9 +611,9 @@
 
     if(state.shape === 'rain'){
       if(!state.paused){
-        const density = state.count; // 3..18
-        const interval = Math.max(0.05, 0.42/(density/7) - state.speed*0.015);
-        rainSpawnAcc += dt * (state.speed/4);
+        const density = state.count; // 3..30, drop density
+        const interval = Math.max(0.035, 0.5/(density/7));
+        rainSpawnAcc += dt * (state.speed/2);
         while(rainSpawnAcc > interval){
           rainSpawnAcc -= interval;
           spawnRipple();
@@ -720,7 +720,7 @@
       const btn = document.createElement('div');
       btn.className = 'shape-btn' + (state.shape===s.id ? ' active' : '');
       btn.innerHTML = s.icon + `<div>${s.label}</div>`;
-      btn.onclick = ()=>{ state.shape = s.id; ripples = []; renderShapeGrid(); renderSceneGrid(); };
+      btn.onclick = ()=>{ state.shape = s.id; ripples = []; renderShapeGrid(); renderSceneGrid(); updateCountLabel(); };
       shapeGrid.appendChild(btn);
     });
   }
@@ -765,16 +765,26 @@
   const sizeVal = document.getElementById('sizeVal');
   const glowVal = document.getElementById('glowVal');
 
+  const countLabel = document.getElementById('countLabel');
+  function updateCountLabel(){
+    countLabel.textContent = state.shape === 'rain' ? 'Gęstość kropli' : 'Liczba świateł';
+  }
+  updateCountLabel();
+
   function syncSliders(){
     countSlider.value = state.count; countVal.textContent = state.count;
-    speedSlider.value = state.speed; speedVal.textContent = state.speed;
+    speedSlider.value = state.speed; speedVal.textContent = state.speed.toFixed(1);
     sizeSlider.value = state.size; sizeVal.textContent = state.size;
     glowSlider.value = state.glow; glowVal.textContent = state.glow;
   }
   syncSliders();
 
   countSlider.oninput = e=>{ state.count = +e.target.value; countVal.textContent = state.count; makeLights(); renderSceneGrid(); };
-  speedSlider.oninput = e=>{ state.speed = +e.target.value; speedVal.textContent = state.speed; renderSceneGrid(); };
+  speedSlider.oninput = e=>{
+    state.speed = Math.round(+e.target.value*10)/10;
+    speedVal.textContent = state.speed.toFixed(1);
+    renderSceneGrid();
+  };
   sizeSlider.oninput = e=>{ state.size = +e.target.value; sizeVal.textContent = state.size; renderSceneGrid(); };
   glowSlider.oninput = e=>{
     state.glow = +e.target.value; glowVal.textContent = state.glow;
@@ -793,7 +803,7 @@
     state.size = Math.floor(rand(80,150));
     ripples = [];
     makeLights();
-    renderPaletteGrid(); renderCustomToggle(); renderShapeGrid(); renderSceneGrid(); syncSliders();
+    renderPaletteGrid(); renderCustomToggle(); renderShapeGrid(); renderSceneGrid(); updateCountLabel(); syncSliders();
   };
 
   const pauseBtn = document.getElementById('pauseBtn');
