@@ -95,6 +95,24 @@
   .palette-grid{
     display:grid; grid-template-columns: repeat(3,1fr); gap:8px;
   }
+
+  /* Scene preset cards */
+  .scene-grid{ display:flex; flex-direction:column; gap:8px; }
+  .scene-btn{
+    display:flex; align-items:center; gap:12px;
+    padding:10px 12px; border-radius:11px; cursor:pointer;
+    border:1.5px solid rgba(255,255,255,0.08);
+    background: rgba(255,255,255,0.03);
+    transition: border-color 0.2s ease, transform 0.15s ease;
+  }
+  .scene-btn:hover{ transform: translateY(-1px); }
+  .scene-btn.active{ border-color: rgba(255,255,255,0.7); }
+  .scene-swatch{
+    width:38px; height:38px; border-radius:9px; flex:none;
+  }
+  .scene-text{ display:flex; flex-direction:column; }
+  .scene-text b{ font-size:12.5px; font-weight:600; }
+  .scene-text span{ font-size:11px; color: var(--text-dim); margin-top:2px; }
   .palette-btn{
     border-radius:10px; border:1.5px solid rgba(255,255,255,0.08);
     height:52px; cursor:pointer; position:relative; overflow:hidden;
@@ -186,6 +204,19 @@
     font-size:11.5px; color: var(--text-dim); line-height:1.6;
   }
 
+  .yt-input{
+    width:100%; height:38px; border-radius:9px; padding:0 12px;
+    background: rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.12);
+    color: var(--text-main); font-size:12.5px; outline:none;
+  }
+  .yt-input::placeholder{ color: rgba(255,255,255,0.3); }
+  .yt-input:focus{ border-color: var(--accent-2); }
+  .yt-status{
+    margin-top:8px; font-size:11.5px; color: var(--text-dim); min-height:16px;
+  }
+  .yt-status.error{ color:#ff8a8a; }
+  .yt-status.ok{ color: var(--accent-2); }
+
   ::-webkit-scrollbar{ width:6px; }
   ::-webkit-scrollbar-thumb{ background: rgba(255,255,255,0.15); border-radius:3px; }
 
@@ -203,11 +234,18 @@
 
 <div id="reviveHint">dotknij ekranu, aby pokazać ustawienia</div>
 
+<div id="ytPlayerHost" style="position:fixed; width:2px; height:2px; overflow:hidden; opacity:0; pointer-events:none;"></div>
+
 <button id="panelToggle" title="Ustawienia">⚙</button>
 
 <div id="panel">
   <h1>Spokojne Światła</h1>
   <p class="subtitle">Wizualny wyciszacz — dobierz kolory i kształt, potem ukryj panel i włącz pełny ekran.</p>
+
+  <div class="section">
+    <div class="section-label">Gotowe sceny</div>
+    <div class="scene-grid" id="sceneGrid"></div>
+  </div>
 
   <div class="section">
     <div class="section-label">Paleta kolorów</div>
@@ -240,6 +278,20 @@
     </div>
   </div>
 
+  <div class="section">
+    <div class="section-label">Muzyka w tle (YouTube, opcjonalnie)</div>
+    <input type="text" id="ytInput" placeholder="wklej link do YouTube..." class="yt-input">
+    <div class="action-row" style="margin-top:8px;">
+      <button class="action-btn" id="ytPlayBtn">▶ Odtwórz</button>
+      <button class="action-btn" id="ytStopBtn">⏹ Zatrzymaj</button>
+    </div>
+    <div class="slider-row" style="margin-top:12px;">
+      <label>Głośność <b id="ytVolVal">40</b></label>
+      <input type="range" id="ytVolSlider" min="0" max="100" step="1" value="40">
+    </div>
+    <div id="ytStatus" class="yt-status"></div>
+  </div>
+
   <div class="action-row">
     <button class="action-btn" id="randomizeBtn">🔀 Losuj</button>
     <button class="action-btn" id="pauseBtn">⏸ Pauza</button>
@@ -249,7 +301,8 @@
   </div>
 
   <div class="hide-panel-note">
-    Wskazówka: po ukryciu panelu dotknij lub kliknij w dowolnym miejscu ekranu, aby przywrócić ustawienia. Ruch jest celowo wolny i bez migotania — mimo to zalecamy, aby opiekun przetestował efekt przed użyciem przez dziecko wrażliwe na bodźce świetlne.
+    Wskazówka: po ukryciu panelu dotknij lub kliknij w dowolnym miejscu ekranu, aby przywrócić ustawienia. Ruch jest celowo wolny i bez migotania — mimo to zalecamy, aby opiekun przetestował efekt przed użyciem przez dziecko wrażliwe na bodźce świetlne.<br><br>
+    Muzyka w tle wymaga połączenia z internetem (strumień z YouTube) i odtwarza tylko treści, do których masz prawo korzystać w ten sposób.
   </div>
 </div>
 
@@ -267,13 +320,14 @@
     { name: "Pastelowy sen", colors: ["#ffb6d9","#c9b6ff","#b6f0d1","#ffe6a7"] },
     { name: "Nocne niebo", colors: ["#5b6ee1","#8a5bd6","#c1b3ff","#3a3f8c"] },
     { name: "Ciepła jesień", colors: ["#e0682b","#c9a227","#8c3b2f","#e8b25b"] },
+    { name: "Kolorowy deszcz", colors: ["#34e5ff","#ff3fa4","#ffce54","#9b6bff","#4dffb8"] },
   ];
 
   let state = {
     paletteIndex: 0,
     useCustom: false,
     customColors: ["#ff7a3d","#ffd166","#8fd6c9","#c1b3ff"],
-    shape: "spiky", // soft | spiky | ring | star
+    shape: "spiky", // soft | spiky | ring | star | rain
     count: 7,
     speed: 3,
     size: 110,
@@ -283,6 +337,26 @@
 
   function activeColors(){
     return state.useCustom ? state.customColors : PALETTES[state.paletteIndex].colors;
+  }
+
+  const SCENES = [
+    {
+      id:'bubbles', name:'Świetlne bąbelki', desc:'klasyczne, unoszące się światła',
+      swatch: 'linear-gradient(135deg,#ff7a3d,#ffd166,#8fd6c9)',
+      apply: ()=>({ shape:'spiky', paletteIndex:0, useCustom:false, count:7, speed:3, size:110, glow:11 }),
+    },
+    {
+      id:'rain', name:'Kolorowy deszcz', desc:'refleksy jak od kropli na szklanym suficie',
+      swatch: 'linear-gradient(135deg,#34e5ff,#ff3fa4,#ffce54)',
+      apply: ()=>({ shape:'rain', paletteIndex:6, useCustom:false, count:10, speed:5, size:130, glow:14 }),
+    },
+  ];
+
+  function applyScene(scene){
+    Object.assign(state, scene.apply());
+    ripples = [];
+    makeLights();
+    renderPaletteGrid(); renderCustomToggle(); renderShapeGrid(); renderSceneGrid(); syncSliders();
   }
 
   // ---------------------------------------------------------------
@@ -462,6 +536,61 @@
   }
 
   // ---------------------------------------------------------------
+  // "Rain on glass ceiling" mode — event-based ripples instead of
+  // drifting orbs. Each drop hits, flashes, and its refracted light
+  // spreads outward as fading concentric rings, as if seen from
+  // underneath a glass roof.
+  // ---------------------------------------------------------------
+  let ripples = [];
+  let rainSpawnAcc = 0;
+
+  function spawnRipple(){
+    const w = window.innerWidth, h = window.innerHeight;
+    const colors = activeColors();
+    const c1 = hexToRgb(colors[Math.floor(Math.random()*colors.length)]);
+    const c2 = hexToRgb(colors[Math.floor(Math.random()*colors.length)]);
+    ripples.push({
+      x: rand(w*0.06, w*0.94),
+      y: rand(h*0.06, h*0.94),
+      born: elapsed,
+      dur: rand(1.3, 2.1),
+      maxR: (state.size/110) * rand(70,150),
+      c1, c2,
+      flashFrac: rand(0.08, 0.16),
+    });
+  }
+
+  function strokeRipple(ctx, x, y, r, color, alpha){
+    if(r <= 0.5 || alpha <= 0.01) return;
+    ctx.save();
+    ctx.lineWidth = Math.max(2, r*0.09);
+    ctx.strokeStyle = `rgba(${color.r},${color.g},${color.b},${alpha})`;
+    ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawRipple(rp, now){
+    const p = (now - rp.born)/rp.dur;
+    if(p < 0 || p > 1) return;
+    const ease = 1 - Math.pow(1-p, 2);
+    // bright impact flash right as the drop lands
+    const flashP = p / rp.flashFrac;
+    if(flashP < 1.4){
+      const flashAlpha = Math.max(0, 1-flashP);
+      if(flashAlpha > 0.02){
+        drawCore(sharpCtx, rp.x, rp.y, rp.maxR*0.22, rp.c1, flashAlpha);
+        drawSoft(glowCtx, rp.x, rp.y, rp.maxR*0.4, rp.c1, flashAlpha*0.9);
+      }
+    }
+    // refracted light spreading outward as fading rings
+    const fade = Math.max(0, 1-ease);
+    const r1 = rp.maxR * ease;
+    const r2 = rp.maxR * Math.max(0, ease-0.14);
+    strokeRipple(glowCtx, rp.x, rp.y, r1, rp.c1, Math.min(1, fade*1.3));
+    if(r2 > 2) strokeRipple(glowCtx, rp.x, rp.y, r2, rp.c2, Math.min(1, fade*0.85));
+  }
+
+  // ---------------------------------------------------------------
   // Animation loop
   // ---------------------------------------------------------------
   let t0 = performance.now();
@@ -480,25 +609,39 @@
     glowCtx.globalCompositeOperation = 'lighter';
     sharpCtx.globalCompositeOperation = 'lighter';
 
-    for(const L of lights){
-      const x = L.cx + Math.cos(elapsed*L.wx + L.phase) * L.ax;
-      const y = L.cy + Math.sin(elapsed*L.wy + L.phase*1.3) * L.ay;
-      const pulse = 1 + Math.sin(elapsed*L.pulseSpeed + L.pulsePhase) * 0.14;
-      const r = L.baseR * pulse * (state.size/110);
-      const rot = L.rot + elapsed * L.rotSpeed;
+    if(state.shape === 'rain'){
+      if(!state.paused){
+        const density = state.count; // 3..18
+        const interval = Math.max(0.05, 0.42/(density/7) - state.speed*0.015);
+        rainSpawnAcc += dt * (state.speed/4);
+        while(rainSpawnAcc > interval){
+          rainSpawnAcc -= interval;
+          spawnRipple();
+        }
+      }
+      ripples = ripples.filter(rp => (elapsed - rp.born) < rp.dur);
+      for(const rp of ripples){ drawRipple(rp, elapsed); }
+    } else {
+      for(const L of lights){
+        const x = L.cx + Math.cos(elapsed*L.wx + L.phase) * L.ax;
+        const y = L.cy + Math.sin(elapsed*L.wy + L.phase*1.3) * L.ay;
+        const pulse = 1 + Math.sin(elapsed*L.pulseSpeed + L.pulsePhase) * 0.14;
+        const r = L.baseR * pulse * (state.size/110);
+        const rot = L.rot + elapsed * L.rotSpeed;
 
-      if(state.shape === 'soft'){
-        drawSoft(glowCtx, x, y, r, L.color, 1);
-        drawSoft(sharpCtx, x, y, r*0.35, L.color, 0.7);
-      } else if(state.shape === 'spiky'){
-        drawSpiky(glowCtx, x, y, r, L.color, 1, L.rays, rot, L.haloColor);
-        drawSoft(sharpCtx, x, y, r*0.3, L.color, 0.75);
-      } else if(state.shape === 'ring'){
-        drawRing(glowCtx, x, y, r, L.color, 1);
-        drawSoft(sharpCtx, x, y, r*0.22, L.color, 0.8);
-      } else if(state.shape === 'star'){
-        drawStar(glowCtx, x, y, r, L.color, 1, 6, rot);
-        drawSoft(sharpCtx, x, y, r*0.25, L.color, 0.7);
+        if(state.shape === 'soft'){
+          drawSoft(glowCtx, x, y, r, L.color, 1);
+          drawSoft(sharpCtx, x, y, r*0.35, L.color, 0.7);
+        } else if(state.shape === 'spiky'){
+          drawSpiky(glowCtx, x, y, r, L.color, 1, L.rays, rot, L.haloColor);
+          drawSoft(sharpCtx, x, y, r*0.3, L.color, 0.75);
+        } else if(state.shape === 'ring'){
+          drawRing(glowCtx, x, y, r, L.color, 1);
+          drawSoft(sharpCtx, x, y, r*0.22, L.color, 0.8);
+        } else if(state.shape === 'star'){
+          drawStar(glowCtx, x, y, r, L.color, 1, 6, rot);
+          drawSoft(sharpCtx, x, y, r*0.25, L.color, 0.7);
+        }
       }
     }
 
@@ -523,6 +666,7 @@
         makeLights();
         renderPaletteGrid();
         renderCustomToggle();
+        renderSceneGrid();
       };
       paletteGrid.appendChild(btn);
     });
@@ -555,6 +699,7 @@
     makeLights();
     renderPaletteGrid();
     renderCustomToggle();
+    renderSceneGrid();
   };
   renderCustomToggle();
 
@@ -566,6 +711,7 @@
     { id:'soft', label:'Miękkie kule', icon:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="12" cy="12" r="7"/></svg>` },
     { id:'ring', label:'Pierścienie', icon:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.5"/></svg>` },
     { id:'star', label:'Gwiazdy', icon:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M12 3l2.2 5.8L20 11l-5.8 2.2L12 19l-2.2-5.8L4 11l5.8-2.2z"/></svg>` },
+    { id:'rain', label:'Deszcz na szkle', icon:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M12 3v5M8 5l1.5 3M16 5l-1.5 3"/><circle cx="12" cy="15" r="1.4" fill="currentColor" stroke="none"/><circle cx="12" cy="15" r="4.2"/><circle cx="12" cy="15" r="7"/></svg>` },
   ];
   const shapeGrid = document.getElementById('shapeGrid');
   function renderShapeGrid(){
@@ -574,11 +720,38 @@
       const btn = document.createElement('div');
       btn.className = 'shape-btn' + (state.shape===s.id ? ' active' : '');
       btn.innerHTML = s.icon + `<div>${s.label}</div>`;
-      btn.onclick = ()=>{ state.shape = s.id; renderShapeGrid(); };
+      btn.onclick = ()=>{ state.shape = s.id; ripples = []; renderShapeGrid(); renderSceneGrid(); };
       shapeGrid.appendChild(btn);
     });
   }
   renderShapeGrid();
+
+  // ---------------------------------------------------------------
+  // UI: scene presets (shape + palette + params bundled together)
+  // ---------------------------------------------------------------
+  const sceneGrid = document.getElementById('sceneGrid');
+  function sceneMatchesState(scene){
+    const v = scene.apply();
+    return v.shape === state.shape
+      && v.paletteIndex === state.paletteIndex
+      && v.useCustom === state.useCustom
+      && v.count === state.count
+      && v.speed === state.speed
+      && v.size === state.size
+      && v.glow === state.glow;
+  }
+  function renderSceneGrid(){
+    sceneGrid.innerHTML = '';
+    SCENES.forEach(scene=>{
+      const btn = document.createElement('div');
+      btn.className = 'scene-btn' + (sceneMatchesState(scene) ? ' active' : '');
+      btn.innerHTML = `<div class="scene-swatch" style="background:${scene.swatch}"></div>
+        <div class="scene-text"><b>${scene.name}</b><span>${scene.desc}</span></div>`;
+      btn.onclick = ()=> applyScene(scene);
+      sceneGrid.appendChild(btn);
+    });
+  }
+  renderSceneGrid();
 
   // ---------------------------------------------------------------
   // UI: sliders
@@ -600,12 +773,13 @@
   }
   syncSliders();
 
-  countSlider.oninput = e=>{ state.count = +e.target.value; countVal.textContent = state.count; makeLights(); };
-  speedSlider.oninput = e=>{ state.speed = +e.target.value; speedVal.textContent = state.speed; };
-  sizeSlider.oninput = e=>{ state.size = +e.target.value; sizeVal.textContent = state.size; };
+  countSlider.oninput = e=>{ state.count = +e.target.value; countVal.textContent = state.count; makeLights(); renderSceneGrid(); };
+  speedSlider.oninput = e=>{ state.speed = +e.target.value; speedVal.textContent = state.speed; renderSceneGrid(); };
+  sizeSlider.oninput = e=>{ state.size = +e.target.value; sizeVal.textContent = state.size; renderSceneGrid(); };
   glowSlider.oninput = e=>{
     state.glow = +e.target.value; glowVal.textContent = state.glow;
     document.documentElement.style.setProperty('--blur-px', state.glow+'px');
+    renderSceneGrid();
   };
 
   // ---------------------------------------------------------------
@@ -617,8 +791,9 @@
     state.shape = SHAPES[Math.floor(Math.random()*SHAPES.length)].id;
     state.count = Math.floor(rand(6,14));
     state.size = Math.floor(rand(80,150));
+    ripples = [];
     makeLights();
-    renderPaletteGrid(); renderCustomToggle(); renderShapeGrid(); syncSliders();
+    renderPaletteGrid(); renderCustomToggle(); renderShapeGrid(); renderSceneGrid(); syncSliders();
   };
 
   const pauseBtn = document.getElementById('pauseBtn');
@@ -631,6 +806,113 @@
     const el = document.documentElement;
     if(el.requestFullscreen) el.requestFullscreen().catch(()=>{});
     closePanel();
+  };
+
+  // ---------------------------------------------------------------
+  // Background music via YouTube IFrame Player API
+  // (streams through YouTube's own embedded player — nothing is
+  // downloaded or rehosted. Requires an internet connection.)
+  // ---------------------------------------------------------------
+  let ytPlayer = null;
+  let ytApiLoading = false;
+  let ytApiReady = false;
+  let pendingVideoId = null;
+  const ytStatus = document.getElementById('ytStatus');
+
+  function setYtStatus(msg, kind){
+    ytStatus.textContent = msg || '';
+    ytStatus.className = 'yt-status' + (kind ? ' '+kind : '');
+  }
+
+  function extractYouTubeId(input){
+    if(!input) return null;
+    input = input.trim();
+    // bare 11-char id
+    if(/^[a-zA-Z0-9_-]{11}$/.test(input)) return input;
+    const patterns = [
+      /youtu\.be\/([a-zA-Z0-9_-]{11})/,
+      /[?&]v=([a-zA-Z0-9_-]{11})/,
+      /embed\/([a-zA-Z0-9_-]{11})/,
+      /shorts\/([a-zA-Z0-9_-]{11})/,
+    ];
+    for(const re of patterns){
+      const m = input.match(re);
+      if(m) return m[1];
+    }
+    return null;
+  }
+
+  function loadYouTubeApi(cb){
+    if(ytApiReady){ cb(); return; }
+    if(!ytApiLoading){
+      ytApiLoading = true;
+      const tag = document.createElement('script');
+      tag.src = 'https://www.youtube.com/iframe_api';
+      document.head.appendChild(tag);
+      window.onYouTubeIframeAPIReady = ()=>{
+        ytApiReady = true;
+        if(pendingVideoId) cb();
+      };
+    }
+    pendingVideoId = true;
+  }
+
+  function playYouTube(videoId){
+    setYtStatus('Ładowanie odtwarzacza…');
+    loadYouTubeApi(()=>{
+      const vol = +document.getElementById('ytVolSlider').value;
+      if(ytPlayer){
+        ytPlayer.loadVideoById(videoId);
+        ytPlayer.setVolume(vol);
+        setYtStatus('Odtwarzanie…', 'ok');
+        return;
+      }
+      ytPlayer = new YT.Player('ytPlayerHost', {
+        height:'2', width:'2', videoId: videoId,
+        playerVars:{
+          autoplay: 1, loop: 1, playlist: videoId,
+          controls: 0, disablekb: 1, fs: 0, modestbranding: 1,
+        },
+        events:{
+          onReady: (e)=>{
+            e.target.setVolume(+document.getElementById('ytVolSlider').value);
+            e.target.playVideo();
+            setYtStatus('Odtwarzanie…', 'ok');
+          },
+          onStateChange: (e)=>{
+            if(e.data === YT.PlayerState.ENDED){
+              e.target.seekTo(0); e.target.playVideo();
+            }
+          },
+          onError: ()=>{
+            setYtStatus('Nie udało się odtworzyć — sprawdź link (film może mieć zablokowane osadzanie).', 'error');
+          }
+        }
+      });
+    });
+  }
+
+  document.getElementById('ytPlayBtn').onclick = ()=>{
+    const raw = document.getElementById('ytInput').value;
+    const id = extractYouTubeId(raw);
+    if(!id){
+      setYtStatus('Nie rozpoznano linku YouTube. Wklej pełny adres filmu.', 'error');
+      return;
+    }
+    playYouTube(id);
+  };
+
+  document.getElementById('ytStopBtn').onclick = ()=>{
+    if(ytPlayer && ytPlayer.stopVideo){ ytPlayer.stopVideo(); }
+    setYtStatus('Zatrzymano.');
+  };
+
+  const ytVolSlider = document.getElementById('ytVolSlider');
+  const ytVolVal = document.getElementById('ytVolVal');
+  ytVolSlider.oninput = (e)=>{
+    const v = +e.target.value;
+    ytVolVal.textContent = v;
+    if(ytPlayer && ytPlayer.setVolume) ytPlayer.setVolume(v);
   };
 
   // ---------------------------------------------------------------
