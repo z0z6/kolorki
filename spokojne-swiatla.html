@@ -1,0 +1,651 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Spokojne Światła — wizualny wyciszacz</title>
+<style>
+  :root{
+    --panel-bg: rgba(12,14,18,0.86);
+    --panel-border: rgba(255,255,255,0.08);
+    --text-main: #e8e6df;
+    --text-dim: #8b8f97;
+    --accent: #ff9d5c;
+    --accent-2: #6fd8c7;
+    --radius: 14px;
+    --control-h: 44px;
+  }
+  *{box-sizing:border-box;}
+  html,body{
+    margin:0; padding:0; width:100%; height:100%;
+    background:#020202;
+    overflow:hidden;
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #stage{
+    position:fixed; inset:0; width:100vw; height:100vh;
+    display:block;
+    background:#020202;
+  }
+  #glowCanvas, #sharpCanvas{
+    position:absolute; inset:0; width:100%; height:100%;
+  }
+  #glowCanvas{ filter: blur(var(--blur-px, 14px)); }
+  #sharpCanvas{ mix-blend-mode: screen; opacity:0.9; }
+
+  /* ---------- Tap-to-reveal hint ---------- */
+  #reviveHint{
+    position:fixed; bottom:22px; left:50%; transform:translateX(-50%);
+    color: rgba(255,255,255,0.35);
+    font-size:13px; letter-spacing:0.02em;
+    pointer-events:none;
+    transition: opacity 0.6s ease;
+    opacity:1;
+    z-index: 5;
+  }
+  #reviveHint.hidden{ opacity:0; }
+
+  /* ---------- Toggle button (always visible, small) ---------- */
+  #panelToggle{
+    position:fixed; top:16px; right:16px; z-index:20;
+    width:46px; height:46px; border-radius:50%;
+    background: rgba(20,20,24,0.55);
+    border:1px solid rgba(255,255,255,0.12);
+    color:#eee; font-size:20px;
+    display:flex; align-items:center; justify-content:center;
+    cursor:pointer;
+    backdrop-filter: blur(6px);
+    transition: background 0.25s ease, transform 0.25s ease, opacity 0.5s ease;
+  }
+  #panelToggle:hover{ background: rgba(40,40,46,0.75); }
+  #panelToggle.dimmed{ opacity:0.25; }
+
+  /* ---------- Control panel ---------- */
+  #panel{
+    position:fixed; top:0; right:0; height:100%;
+    width: 320px; max-width: 88vw;
+    background: var(--panel-bg);
+    border-left:1px solid var(--panel-border);
+    backdrop-filter: blur(14px);
+    color: var(--text-main);
+    z-index: 15;
+    transform: translateX(100%);
+    transition: transform 0.38s cubic-bezier(.2,.9,.25,1);
+    overflow-y:auto;
+    padding: 22px 20px 40px;
+  }
+  #panel.open{ transform: translateX(0); }
+
+  #panel h1{
+    font-size:17px; font-weight:600; margin:0 0 2px;
+    letter-spacing:0.01em;
+  }
+  #panel .subtitle{
+    font-size:12.5px; color:var(--text-dim); margin:0 0 22px;
+    line-height:1.5;
+  }
+  .section{ margin-bottom: 24px; }
+  .section-label{
+    font-size:12px; color: var(--text-dim);
+    margin-bottom:10px; font-weight:500;
+  }
+
+  /* Palette swatch grid */
+  .palette-grid{
+    display:grid; grid-template-columns: repeat(3,1fr); gap:8px;
+  }
+  .palette-btn{
+    border-radius:10px; border:1.5px solid rgba(255,255,255,0.08);
+    height:52px; cursor:pointer; position:relative; overflow:hidden;
+    transition: border-color 0.2s ease, transform 0.15s ease;
+  }
+  .palette-btn:hover{ transform: translateY(-1px); }
+  .palette-btn.active{ border-color: rgba(255,255,255,0.75); }
+  .palette-btn span{
+    position:absolute; bottom:3px; left:6px; right:6px;
+    font-size:9.5px; color:rgba(255,255,255,0.85);
+    text-shadow: 0 1px 3px rgba(0,0,0,0.8);
+  }
+
+  /* Custom color row */
+  .custom-colors{
+    display:flex; gap:8px; align-items:center; margin-top:10px;
+  }
+  .custom-colors input[type=color]{
+    width:34px; height:34px; border:none; border-radius:50%;
+    padding:0; background:none; cursor:pointer;
+    overflow:hidden;
+  }
+  .custom-colors input[type=color]::-webkit-color-swatch-wrapper{padding:0;}
+  .custom-colors input[type=color]::-webkit-color-swatch{border:1.5px solid rgba(255,255,255,0.25); border-radius:50%;}
+  .use-custom-btn{
+    margin-top:12px; width:100%; height:36px; border-radius:9px;
+    background: rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.1);
+    color: var(--text-main); font-size:12.5px; cursor:pointer;
+  }
+  .use-custom-btn.active{
+    background: rgba(255,157,92,0.18); border-color: rgba(255,157,92,0.5);
+  }
+
+  /* Shape selector */
+  .shape-grid{
+    display:grid; grid-template-columns: repeat(2,1fr); gap:8px;
+  }
+  .shape-btn{
+    height:64px; border-radius:10px;
+    background: rgba(255,255,255,0.04); border:1.5px solid rgba(255,255,255,0.08);
+    color: var(--text-dim); font-size:11.5px; cursor:pointer;
+    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:6px;
+    transition: all 0.2s ease;
+  }
+  .shape-btn svg{ width:22px; height:22px; opacity:0.8; }
+  .shape-btn.active{
+    border-color: var(--accent); color: var(--text-main);
+    background: rgba(255,157,92,0.1);
+  }
+
+  /* Sliders */
+  .slider-row{ margin-bottom:16px; }
+  .slider-row label{
+    display:flex; justify-content:space-between; font-size:12.5px;
+    color: var(--text-dim); margin-bottom:6px;
+  }
+  .slider-row label b{ color: var(--text-main); font-weight:500; }
+  input[type=range]{
+    -webkit-appearance:none; width:100%; height:4px; border-radius:2px;
+    background: rgba(255,255,255,0.12); outline:none;
+  }
+  input[type=range]::-webkit-slider-thumb{
+    -webkit-appearance:none; width:16px; height:16px; border-radius:50%;
+    background: var(--accent-2); cursor:pointer;
+    box-shadow: 0 0 0 4px rgba(111,216,199,0.15);
+  }
+  input[type=range]::-moz-range-thumb{
+    width:16px; height:16px; border-radius:50%; border:none;
+    background: var(--accent-2); cursor:pointer;
+  }
+
+  /* Action buttons */
+  .action-row{ display:flex; gap:8px; margin-top:6px; }
+  .action-btn{
+    flex:1; height: var(--control-h); border-radius:10px;
+    background: rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.1);
+    color: var(--text-main); font-size:13px; cursor:pointer;
+    display:flex; align-items:center; justify-content:center; gap:6px;
+    transition: background 0.2s ease;
+  }
+  .action-btn:hover{ background: rgba(255,255,255,0.12); }
+  .action-btn.primary{
+    background: linear-gradient(135deg, rgba(255,157,92,0.85), rgba(255,120,120,0.75));
+    border:none; color:#1a1208; font-weight:600;
+  }
+
+  .hide-panel-note{
+    margin-top:22px; padding-top:16px; border-top:1px solid rgba(255,255,255,0.07);
+    font-size:11.5px; color: var(--text-dim); line-height:1.6;
+  }
+
+  ::-webkit-scrollbar{ width:6px; }
+  ::-webkit-scrollbar-thumb{ background: rgba(255,255,255,0.15); border-radius:3px; }
+
+  @media (max-width: 480px){
+    #panel{ width: 86vw; padding:18px 16px 32px; }
+  }
+</style>
+</head>
+<body>
+
+<div id="stage">
+  <canvas id="glowCanvas"></canvas>
+  <canvas id="sharpCanvas"></canvas>
+</div>
+
+<div id="reviveHint">dotknij ekranu, aby pokazać ustawienia</div>
+
+<button id="panelToggle" title="Ustawienia">⚙</button>
+
+<div id="panel">
+  <h1>Spokojne Światła</h1>
+  <p class="subtitle">Wizualny wyciszacz — dobierz kolory i kształt, potem ukryj panel i włącz pełny ekran.</p>
+
+  <div class="section">
+    <div class="section-label">Paleta kolorów</div>
+    <div class="palette-grid" id="paletteGrid"></div>
+    <div class="custom-colors" id="customColors"></div>
+    <button class="use-custom-btn" id="useCustomBtn">Użyj własnych kolorów</button>
+  </div>
+
+  <div class="section">
+    <div class="section-label">Kształt świateł</div>
+    <div class="shape-grid" id="shapeGrid"></div>
+  </div>
+
+  <div class="section">
+    <div class="slider-row">
+      <label>Liczba świateł <b id="countVal"></b></label>
+      <input type="range" id="countSlider" min="3" max="18" step="1">
+    </div>
+    <div class="slider-row">
+      <label>Prędkość ruchu <b id="speedVal"></b></label>
+      <input type="range" id="speedSlider" min="1" max="10" step="1">
+    </div>
+    <div class="slider-row">
+      <label>Rozmiar świateł <b id="sizeVal"></b></label>
+      <input type="range" id="sizeSlider" min="50" max="180" step="5">
+    </div>
+    <div class="slider-row">
+      <label>Poświata (blur) <b id="glowVal"></b></label>
+      <input type="range" id="glowSlider" min="4" max="34" step="1">
+    </div>
+  </div>
+
+  <div class="action-row">
+    <button class="action-btn" id="randomizeBtn">🔀 Losuj</button>
+    <button class="action-btn" id="pauseBtn">⏸ Pauza</button>
+  </div>
+  <div class="action-row" style="margin-top:8px;">
+    <button class="action-btn primary" id="fullscreenBtn">⛶ Pełny ekran + ukryj panel</button>
+  </div>
+
+  <div class="hide-panel-note">
+    Wskazówka: po ukryciu panelu dotknij lub kliknij w dowolnym miejscu ekranu, aby przywrócić ustawienia. Ruch jest celowo wolny i bez migotania — mimo to zalecamy, aby opiekun przetestował efekt przed użyciem przez dziecko wrażliwe na bodźce świetlne.
+  </div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  // ---------------------------------------------------------------
+  // Palettes
+  // ---------------------------------------------------------------
+  const PALETTES = [
+    { name: "Zachód słońca", colors: ["#ff7a3d","#ffd166","#ff4d5e","#8fd6c9"] },
+    { name: "Ocean", colors: ["#3fd0e0","#2b7fd6","#8ff0e8","#1f4e8c"] },
+    { name: "Las",  colors: ["#6fbf73","#a4d65e","#2e8b57","#e0c341"] },
+    { name: "Pastelowy sen", colors: ["#ffb6d9","#c9b6ff","#b6f0d1","#ffe6a7"] },
+    { name: "Nocne niebo", colors: ["#5b6ee1","#8a5bd6","#c1b3ff","#3a3f8c"] },
+    { name: "Ciepła jesień", colors: ["#e0682b","#c9a227","#8c3b2f","#e8b25b"] },
+  ];
+
+  let state = {
+    paletteIndex: 0,
+    useCustom: false,
+    customColors: ["#ff7a3d","#ffd166","#8fd6c9","#c1b3ff"],
+    shape: "spiky", // soft | spiky | ring | star
+    count: 9,
+    speed: 3,
+    size: 110,
+    glow: 11,
+    paused: false,
+  };
+
+  function activeColors(){
+    return state.useCustom ? state.customColors : PALETTES[state.paletteIndex].colors;
+  }
+
+  // ---------------------------------------------------------------
+  // Canvas setup
+  // ---------------------------------------------------------------
+  const glowCanvas = document.getElementById('glowCanvas');
+  const sharpCanvas = document.getElementById('sharpCanvas');
+  const glowCtx = glowCanvas.getContext('2d');
+  const sharpCtx = sharpCanvas.getContext('2d');
+
+  function resize(){
+    const w = window.innerWidth, h = window.innerHeight;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    [glowCanvas, sharpCanvas].forEach(c=>{
+      c.width = w*dpr; c.height = h*dpr;
+      c.style.width = w+'px'; c.style.height = h+'px';
+    });
+    glowCtx.setTransform(dpr,0,0,dpr,0,0);
+    sharpCtx.setTransform(dpr,0,0,dpr,0,0);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  document.documentElement.style.setProperty('--blur-px', state.glow+'px');
+
+  // ---------------------------------------------------------------
+  // Light objects
+  // ---------------------------------------------------------------
+  let lights = [];
+
+  function hexToRgb(hex){
+    const v = parseInt(hex.slice(1),16);
+    return { r:(v>>16)&255, g:(v>>8)&255, b:v&255 };
+  }
+
+  function rand(a,b){ return a + Math.random()*(b-a); }
+
+  function makeRays(n){
+    const rays = [];
+    for(let i=0;i<n;i++){
+      rays.push({
+        angle: (i/n)*Math.PI*2 + rand(-0.06,0.06),
+        len: rand(1.15, 1.75),
+        width: rand(0.6, 1.4),
+      });
+    }
+    return rays;
+  }
+
+  function makeLights(){
+    const colors = activeColors();
+    const w = window.innerWidth, h = window.innerHeight;
+    lights = [];
+    for(let i=0;i<state.count;i++){
+      const c = colors[i % colors.length];
+      lights.push({
+        cx: rand(w*0.15, w*0.85),
+        cy: rand(h*0.15, h*0.85),
+        baseR: rand(state.size*0.55, state.size*1.15),
+        color: hexToRgb(c),
+        // slow independent orbit parameters
+        ax: rand(w*0.06, w*0.22),
+        ay: rand(h*0.06, h*0.22),
+        wx: rand(0.05,0.11) * (Math.random()<0.5?-1:1),
+        wy: rand(0.04,0.10) * (Math.random()<0.5?-1:1),
+        phase: rand(0, Math.PI*2),
+        pulsePhase: rand(0, Math.PI*2),
+        pulseSpeed: rand(0.15,0.35),
+        rot: rand(0,Math.PI*2),
+        rotSpeed: rand(-0.04,0.04),
+        rays: makeRays(Math.floor(rand(40,70))),
+      });
+    }
+  }
+  makeLights();
+
+  // ---------------------------------------------------------------
+  // Shape drawing
+  // ---------------------------------------------------------------
+  function drawSoft(ctx, x, y, r, color, alpha){
+    const g = ctx.createRadialGradient(x,y,0,x,y,r);
+    g.addColorStop(0, `rgba(${color.r},${color.g},${color.b},${0.95*alpha})`);
+    g.addColorStop(0.5, `rgba(${color.r},${color.g},${color.b},${0.35*alpha})`);
+    g.addColorStop(1, `rgba(${color.r},${color.g},${color.b},0)`);
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(x,y,r,0,Math.PI*2);
+    ctx.fill();
+  }
+
+  function drawSpiky(ctx, x, y, r, color, alpha, rays, rot){
+    // soft base glow (slightly smaller than rays so core reads clearly)
+    drawSoft(ctx, x, y, r*0.9, color, alpha);
+    // radiating corona filaments
+    ctx.save();
+    ctx.translate(x,y);
+    ctx.rotate(rot);
+    for(const ray of rays){
+      const a = ray.angle;
+      const x1 = Math.cos(a)*r*0.55, y1 = Math.sin(a)*r*0.55;
+      const x2 = Math.cos(a)*r*ray.len, y2 = Math.sin(a)*r*ray.len;
+      const grad = ctx.createLinearGradient(x1,y1,x2,y2);
+      grad.addColorStop(0, `rgba(${color.r},${color.g},${color.b},${0.55*alpha})`);
+      grad.addColorStop(1, `rgba(${color.r},${color.g},${color.b},0)`);
+      ctx.strokeStyle = grad;
+      ctx.lineWidth = Math.max(1, r*0.045*ray.width);
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(x1,y1);
+      ctx.lineTo(x2,y2);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function drawRing(ctx, x, y, r, color, alpha){
+    // two offset rings for a soft chromatic bokeh feel
+    ctx.save();
+    ctx.lineWidth = Math.max(3, r*0.12);
+    ctx.strokeStyle = `rgba(${color.r},${color.g},${color.b},${0.55*alpha})`;
+    ctx.beginPath(); ctx.arc(x,y,r*0.72,0,Math.PI*2); ctx.stroke();
+    ctx.lineWidth = Math.max(2, r*0.06);
+    ctx.strokeStyle = `rgba(${color.r},${color.g},${color.b},${0.3*alpha})`;
+    ctx.beginPath(); ctx.arc(x,y,r*0.95,0,Math.PI*2); ctx.stroke();
+    ctx.restore();
+    // soft core
+    drawSoft(ctx, x, y, r*0.45, color, alpha*0.8);
+  }
+
+  function drawStar(ctx, x, y, r, color, alpha, points, rot){
+    ctx.save();
+    ctx.translate(x,y);
+    ctx.rotate(rot);
+    ctx.beginPath();
+    const n = Math.max(5, Math.min(8, points));
+    for(let i=0;i<n*2;i++){
+      const a = (i/(n*2))*Math.PI*2;
+      const rr = (i%2===0) ? r : r*0.42;
+      const px = Math.cos(a)*rr, py = Math.sin(a)*rr;
+      if(i===0) ctx.moveTo(px,py); else ctx.lineTo(px,py);
+    }
+    ctx.closePath();
+    const g = ctx.createRadialGradient(0,0,0,0,0,r);
+    g.addColorStop(0, `rgba(${color.r},${color.g},${color.b},${0.85*alpha})`);
+    g.addColorStop(1, `rgba(${color.r},${color.g},${color.b},0)`);
+    ctx.fillStyle = g;
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // ---------------------------------------------------------------
+  // Animation loop
+  // ---------------------------------------------------------------
+  let t0 = performance.now();
+  let elapsed = 0;
+
+  function frame(now){
+    const dt = Math.min(0.05, (now - t0)/1000);
+    t0 = now;
+    if(!state.paused){
+      elapsed += dt * (state.speed/4);
+    }
+
+    const w = window.innerWidth, h = window.innerHeight;
+    glowCtx.clearRect(0,0,w,h);
+    sharpCtx.clearRect(0,0,w,h);
+    glowCtx.globalCompositeOperation = 'lighter';
+    sharpCtx.globalCompositeOperation = 'lighter';
+
+    for(const L of lights){
+      const x = L.cx + Math.cos(elapsed*L.wx + L.phase) * L.ax;
+      const y = L.cy + Math.sin(elapsed*L.wy + L.phase*1.3) * L.ay;
+      const pulse = 1 + Math.sin(elapsed*L.pulseSpeed + L.pulsePhase) * 0.14;
+      const r = L.baseR * pulse * (state.size/110);
+      const rot = L.rot + elapsed * L.rotSpeed;
+
+      if(state.shape === 'soft'){
+        drawSoft(glowCtx, x, y, r, L.color, 1);
+        drawSoft(sharpCtx, x, y, r*0.35, L.color, 0.7);
+      } else if(state.shape === 'spiky'){
+        drawSpiky(glowCtx, x, y, r, L.color, 1, L.rays, rot);
+        drawSoft(sharpCtx, x, y, r*0.3, L.color, 0.75);
+      } else if(state.shape === 'ring'){
+        drawRing(glowCtx, x, y, r, L.color, 1);
+        drawSoft(sharpCtx, x, y, r*0.22, L.color, 0.8);
+      } else if(state.shape === 'star'){
+        drawStar(glowCtx, x, y, r, L.color, 1, 6, rot);
+        drawSoft(sharpCtx, x, y, r*0.25, L.color, 0.7);
+      }
+    }
+
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+
+  // ---------------------------------------------------------------
+  // UI: palette grid
+  // ---------------------------------------------------------------
+  const paletteGrid = document.getElementById('paletteGrid');
+  function renderPaletteGrid(){
+    paletteGrid.innerHTML = '';
+    PALETTES.forEach((p, i)=>{
+      const btn = document.createElement('div');
+      btn.className = 'palette-btn' + (!state.useCustom && i===state.paletteIndex ? ' active' : '');
+      btn.style.background = `linear-gradient(135deg, ${p.colors.join(',')})`;
+      btn.innerHTML = `<span>${p.name}</span>`;
+      btn.onclick = ()=>{
+        state.paletteIndex = i;
+        state.useCustom = false;
+        makeLights();
+        renderPaletteGrid();
+        renderCustomToggle();
+      };
+      paletteGrid.appendChild(btn);
+    });
+  }
+  renderPaletteGrid();
+
+  // custom colors
+  const customColorsEl = document.getElementById('customColors');
+  function renderCustomColors(){
+    customColorsEl.innerHTML = '';
+    state.customColors.forEach((c, i)=>{
+      const inp = document.createElement('input');
+      inp.type = 'color'; inp.value = c;
+      inp.oninput = (e)=>{
+        state.customColors[i] = e.target.value;
+        if(state.useCustom) makeLights();
+      };
+      customColorsEl.appendChild(inp);
+    });
+  }
+  renderCustomColors();
+
+  const useCustomBtn = document.getElementById('useCustomBtn');
+  function renderCustomToggle(){
+    useCustomBtn.classList.toggle('active', state.useCustom);
+    useCustomBtn.textContent = state.useCustom ? 'Własne kolory (aktywne)' : 'Użyj własnych kolorów';
+  }
+  useCustomBtn.onclick = ()=>{
+    state.useCustom = !state.useCustom;
+    makeLights();
+    renderPaletteGrid();
+    renderCustomToggle();
+  };
+  renderCustomToggle();
+
+  // ---------------------------------------------------------------
+  // UI: shape grid
+  // ---------------------------------------------------------------
+  const SHAPES = [
+    { id:'spiky', label:'Świetlne kolce', icon:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="12" cy="12" r="5"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2"/></svg>` },
+    { id:'soft', label:'Miękkie kule', icon:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="12" cy="12" r="7"/></svg>` },
+    { id:'ring', label:'Pierścienie', icon:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.5"/></svg>` },
+    { id:'star', label:'Gwiazdy', icon:`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M12 3l2.2 5.8L20 11l-5.8 2.2L12 19l-2.2-5.8L4 11l5.8-2.2z"/></svg>` },
+  ];
+  const shapeGrid = document.getElementById('shapeGrid');
+  function renderShapeGrid(){
+    shapeGrid.innerHTML = '';
+    SHAPES.forEach(s=>{
+      const btn = document.createElement('div');
+      btn.className = 'shape-btn' + (state.shape===s.id ? ' active' : '');
+      btn.innerHTML = s.icon + `<div>${s.label}</div>`;
+      btn.onclick = ()=>{ state.shape = s.id; renderShapeGrid(); };
+      shapeGrid.appendChild(btn);
+    });
+  }
+  renderShapeGrid();
+
+  // ---------------------------------------------------------------
+  // UI: sliders
+  // ---------------------------------------------------------------
+  const countSlider = document.getElementById('countSlider');
+  const speedSlider = document.getElementById('speedSlider');
+  const sizeSlider = document.getElementById('sizeSlider');
+  const glowSlider = document.getElementById('glowSlider');
+  const countVal = document.getElementById('countVal');
+  const speedVal = document.getElementById('speedVal');
+  const sizeVal = document.getElementById('sizeVal');
+  const glowVal = document.getElementById('glowVal');
+
+  function syncSliders(){
+    countSlider.value = state.count; countVal.textContent = state.count;
+    speedSlider.value = state.speed; speedVal.textContent = state.speed;
+    sizeSlider.value = state.size; sizeVal.textContent = state.size;
+    glowSlider.value = state.glow; glowVal.textContent = state.glow;
+  }
+  syncSliders();
+
+  countSlider.oninput = e=>{ state.count = +e.target.value; countVal.textContent = state.count; makeLights(); };
+  speedSlider.oninput = e=>{ state.speed = +e.target.value; speedVal.textContent = state.speed; };
+  sizeSlider.oninput = e=>{ state.size = +e.target.value; sizeVal.textContent = state.size; };
+  glowSlider.oninput = e=>{
+    state.glow = +e.target.value; glowVal.textContent = state.glow;
+    document.documentElement.style.setProperty('--blur-px', state.glow+'px');
+  };
+
+  // ---------------------------------------------------------------
+  // Actions
+  // ---------------------------------------------------------------
+  document.getElementById('randomizeBtn').onclick = ()=>{
+    state.paletteIndex = Math.floor(Math.random()*PALETTES.length);
+    state.useCustom = false;
+    state.shape = SHAPES[Math.floor(Math.random()*SHAPES.length)].id;
+    state.count = Math.floor(rand(6,14));
+    state.size = Math.floor(rand(80,150));
+    makeLights();
+    renderPaletteGrid(); renderCustomToggle(); renderShapeGrid(); syncSliders();
+  };
+
+  const pauseBtn = document.getElementById('pauseBtn');
+  pauseBtn.onclick = ()=>{
+    state.paused = !state.paused;
+    pauseBtn.textContent = state.paused ? '▶ Wznów' : '⏸ Pauza';
+  };
+
+  document.getElementById('fullscreenBtn').onclick = ()=>{
+    const el = document.documentElement;
+    if(el.requestFullscreen) el.requestFullscreen().catch(()=>{});
+    closePanel();
+  };
+
+  // ---------------------------------------------------------------
+  // Panel open/close + auto-hide screensaver behaviour
+  // ---------------------------------------------------------------
+  const panel = document.getElementById('panel');
+  const panelToggle = document.getElementById('panelToggle');
+  const reviveHint = document.getElementById('reviveHint');
+  let dimTimer = null;
+
+  function openPanel(){
+    panel.classList.add('open');
+    panelToggle.classList.remove('dimmed');
+    reviveHint.classList.add('hidden');
+    clearTimeout(dimTimer);
+  }
+  function closePanel(){
+    panel.classList.remove('open');
+    scheduleDim();
+  }
+  function scheduleDim(){
+    clearTimeout(dimTimer);
+    dimTimer = setTimeout(()=>{
+      panelToggle.classList.add('dimmed');
+      reviveHint.classList.remove('hidden');
+    }, 4000);
+  }
+
+  panelToggle.onclick = ()=>{
+    if(panel.classList.contains('open')) closePanel(); else openPanel();
+  };
+
+  document.getElementById('stage').addEventListener('click', ()=>{
+    if(!panel.classList.contains('open')){
+      panelToggle.classList.remove('dimmed');
+      reviveHint.classList.add('hidden');
+      scheduleDim();
+    }
+  });
+
+  scheduleDim();
+
+})();
+</script>
+</body>
+</html>
