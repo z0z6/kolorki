@@ -31,6 +31,18 @@
   #glowCanvas, #sharpCanvas{
     position:absolute; inset:0; width:100%; height:100%;
   }
+  #backdrop{
+    position:absolute; inset:-6%; width:112%; height:112%;
+    background:#020202;
+    filter: blur(70px) saturate(1.15);
+    transition: background 1.4s ease;
+    animation: backdropBreathe 28s ease-in-out infinite alternate;
+    will-change: transform;
+  }
+  @keyframes backdropBreathe{
+    from{ transform: scale(1) translate(0,0); }
+    to{ transform: scale(1.07) translate(-1%, 1%); }
+  }
   #glowCanvas{ filter: blur(var(--blur-px, 14px)); }
   #sharpCanvas{ mix-blend-mode: screen; opacity:0.9; }
 
@@ -228,6 +240,7 @@
 <body>
 
 <div id="stage">
+  <div id="backdrop"></div>
   <canvas id="glowCanvas"></canvas>
   <canvas id="sharpCanvas"></canvas>
 </div>
@@ -245,6 +258,11 @@
   <div class="section">
     <div class="section-label">Gotowe sceny</div>
     <div class="scene-grid" id="sceneGrid"></div>
+  </div>
+
+  <div class="section">
+    <div class="section-label">Tło</div>
+    <div class="palette-grid" id="backdropGrid"></div>
   </div>
 
   <div class="section">
@@ -323,6 +341,18 @@
     { name: "Kolorowy deszcz", colors: ["#34e5ff","#ff3fa4","#ffce54","#9b6bff","#4dffb8"] },
   ];
 
+  // ---------------------------------------------------------------
+  // Background presets (soft, blurred colour wash behind everything)
+  // ---------------------------------------------------------------
+  const BACKDROPS = [
+    { name:"Brak", css:"#020202" },
+    { name:"Zachód słońca", css:"radial-gradient(ellipse 60% 50% at 25% 20%, rgba(255,110,60,0.35), transparent 60%), radial-gradient(ellipse 55% 45% at 80% 75%, rgba(120,30,60,0.4), transparent 65%), radial-gradient(ellipse 70% 60% at 55% 100%, rgba(40,15,10,0.6), transparent 70%), #08050a" },
+    { name:"Ocean", css:"radial-gradient(ellipse 55% 45% at 20% 25%, rgba(30,110,140,0.4), transparent 60%), radial-gradient(ellipse 60% 50% at 80% 70%, rgba(15,45,90,0.45), transparent 65%), #030608" },
+    { name:"Las", css:"radial-gradient(ellipse 55% 45% at 25% 20%, rgba(45,100,55,0.35), transparent 60%), radial-gradient(ellipse 60% 50% at 75% 80%, rgba(20,65,40,0.4), transparent 65%), #030603" },
+    { name:"Nocne niebo", css:"radial-gradient(ellipse 55% 45% at 30% 20%, rgba(75,60,160,0.35), transparent 60%), radial-gradient(ellipse 60% 50% at 75% 75%, rgba(45,20,95,0.4), transparent 65%), #04030a" },
+    { name:"Kolorowy deszcz", css:"radial-gradient(ellipse 50% 40% at 20% 25%, rgba(52,229,255,0.22), transparent 55%), radial-gradient(ellipse 50% 40% at 80% 20%, rgba(255,63,164,0.2), transparent 55%), radial-gradient(ellipse 55% 45% at 50% 90%, rgba(155,107,255,0.22), transparent 60%), #030308" },
+  ];
+
   let state = {
     paletteIndex: 0,
     useCustom: false,
@@ -332,6 +362,7 @@
     speed: 1,
     size: 110,
     glow: 11,
+    backdropIndex: 0,
     paused: false,
   };
 
@@ -343,12 +374,12 @@
     {
       id:'bubbles', name:'Świetlne bąbelki', desc:'klasyczne, unoszące się światła',
       swatch: 'linear-gradient(135deg,#ff7a3d,#ffd166,#8fd6c9)',
-      apply: ()=>({ shape:'spiky', paletteIndex:0, useCustom:false, count:7, speed:1, size:110, glow:11 }),
+      apply: ()=>({ shape:'spiky', paletteIndex:0, useCustom:false, count:7, speed:1, size:110, glow:11, backdropIndex:1 }),
     },
     {
       id:'rain', name:'Kolorowy deszcz', desc:'refleksy jak od kropli na szklanym suficie',
       swatch: 'linear-gradient(135deg,#34e5ff,#ff3fa4,#ffce54)',
-      apply: ()=>({ shape:'rain', paletteIndex:6, useCustom:false, count:20, speed:1.2, size:130, glow:14 }),
+      apply: ()=>({ shape:'rain', paletteIndex:6, useCustom:false, count:20, speed:1.2, size:130, glow:14, backdropIndex:5 }),
     },
   ];
 
@@ -356,7 +387,8 @@
     Object.assign(state, scene.apply());
     ripples = [];
     makeLights();
-    renderPaletteGrid(); renderCustomToggle(); renderShapeGrid(); renderSceneGrid(); updateCountLabel(); syncSliders();
+    applyBackdrop();
+    renderPaletteGrid(); renderCustomToggle(); renderShapeGrid(); renderSceneGrid(); renderBackdropGrid(); updateCountLabel(); syncSliders();
   }
 
   // ---------------------------------------------------------------
@@ -537,57 +569,101 @@
 
   // ---------------------------------------------------------------
   // "Rain on glass ceiling" mode — event-based ripples instead of
-  // drifting orbs. Each drop hits, flashes, and its refracted light
-  // spreads outward as fading concentric rings, as if seen from
-  // underneath a glass roof.
+  // drifting orbs. Each drop lands as a small dark (often near-black)
+  // dot, then blooms outward into its bright colour; the rim gets
+  // more and more ragged the further it spreads from the impact
+  // point, as if seen refracted through glass from underneath.
   // ---------------------------------------------------------------
   let ripples = [];
   let rainSpawnAcc = 0;
 
+  function smoothNoise(arr, passes){
+    let a = arr.slice();
+    for(let pass=0; pass<passes; pass++){
+      const b = a.slice();
+      const n = a.length;
+      for(let i=0;i<n;i++){
+        a[i] = (b[(i-1+n)%n] + b[i] + b[(i+1)%n]) / 3;
+      }
+    }
+    return a;
+  }
+
   function spawnRipple(){
     const w = window.innerWidth, h = window.innerHeight;
     const colors = activeColors();
-    const c1 = hexToRgb(colors[Math.floor(Math.random()*colors.length)]);
-    const c2 = hexToRgb(colors[Math.floor(Math.random()*colors.length)]);
+    const baseColor = hexToRgb(colors[Math.floor(Math.random()*colors.length)]);
+    const useBlack = Math.random() < 0.5;
+    const darkColor = useBlack
+      ? { r: rand(4,14)|0, g: rand(4,14)|0, b: rand(6,16)|0 }
+      : { r: Math.round(baseColor.r*0.14), g: Math.round(baseColor.g*0.14), b: Math.round(baseColor.b*0.14) };
+    const N = Math.floor(rand(40,64));
+    let edgeNoise = [];
+    for(let i=0;i<N;i++) edgeNoise.push(rand(-1,1));
+    edgeNoise = smoothNoise(edgeNoise, 2);
     ripples.push({
       x: rand(w*0.06, w*0.94),
       y: rand(h*0.06, h*0.94),
       born: elapsed,
-      dur: rand(1.3, 2.1),
+      dur: rand(1.6, 2.6),
       maxR: (state.size/110) * rand(70,150),
-      c1, c2,
-      flashFrac: rand(0.08, 0.16),
+      baseColor, darkColor, edgeNoise,
     });
   }
 
-  function strokeRipple(ctx, x, y, r, color, alpha){
-    if(r <= 0.5 || alpha <= 0.01) return;
+  function drawRaggedBlob(ctx, x, y, r, edgeNoise, jag, color, alpha){
+    if(r <= 1 || alpha <= 0.01) return;
+    const N = edgeNoise.length;
     ctx.save();
-    ctx.lineWidth = Math.max(2, r*0.09);
-    ctx.strokeStyle = `rgba(${color.r},${color.g},${color.b},${alpha})`;
-    ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.stroke();
+    ctx.translate(x,y);
+    ctx.beginPath();
+    for(let i=0;i<=N;i++){
+      const idx = i % N;
+      const a = (idx/N)*Math.PI*2;
+      const jr = r * (1 + edgeNoise[idx]*jag);
+      const px = Math.cos(a)*jr, py = Math.sin(a)*jr;
+      if(i===0) ctx.moveTo(px,py); else ctx.lineTo(px,py);
+    }
+    ctx.closePath();
+    const g = ctx.createRadialGradient(0,0,0,0,0,r*(1+jag));
+    g.addColorStop(0,   `rgba(${color.r},${color.g},${color.b},${0.92*alpha})`);
+    g.addColorStop(0.65,`rgba(${color.r},${color.g},${color.b},${0.55*alpha})`);
+    g.addColorStop(1,   `rgba(${color.r},${color.g},${color.b},0)`);
+    ctx.fillStyle = g;
+    ctx.fill();
     ctx.restore();
   }
 
   function drawRipple(rp, now){
     const p = (now - rp.born)/rp.dur;
     if(p < 0 || p > 1) return;
-    const ease = 1 - Math.pow(1-p, 2);
-    // bright impact flash right as the drop lands
-    const flashP = p / rp.flashFrac;
-    if(flashP < 1.4){
-      const flashAlpha = Math.max(0, 1-flashP);
-      if(flashAlpha > 0.02){
-        drawCore(sharpCtx, rp.x, rp.y, rp.maxR*0.22, rp.c1, flashAlpha);
-        drawSoft(glowCtx, rp.x, rp.y, rp.maxR*0.4, rp.c1, flashAlpha*0.9);
-      }
+
+    // radius: eased growth from a tiny landing dot to full spread
+    const grow = 1 - Math.pow(1-p, 2);
+    const r = Math.max(3, rp.maxR * grow);
+
+    // colour: dark landing dot blooms into the bright colour
+    const colorT = Math.min(1, p/0.4);
+    const cr = rp.darkColor.r + (rp.baseColor.r-rp.darkColor.r)*colorT;
+    const cg = rp.darkColor.g + (rp.baseColor.g-rp.darkColor.g)*colorT;
+    const cb = rp.darkColor.b + (rp.baseColor.b-rp.darkColor.b)*colorT;
+    const color = { r:cr, g:cg, b:cb };
+
+    // opacity envelope: materialise fast, dissolve slowly at the end
+    let alpha;
+    if(p < 0.10) alpha = p/0.10;
+    else if(p > 0.55) alpha = Math.max(0, 1 - (p-0.55)/0.45);
+    else alpha = 1;
+    if(alpha <= 0.015) return;
+
+    // raggedness grows the further the ripple gets from its origin
+    const jag = 0.05 + grow*0.85;
+
+    drawRaggedBlob(glowCtx, rp.x, rp.y, r, rp.edgeNoise, jag, color, alpha);
+    // small crisp core early on, while the drop is still landing
+    if(p < 0.35){
+      drawSoft(sharpCtx, rp.x, rp.y, r*0.4, color, alpha*(1-p/0.35)*0.6);
     }
-    // refracted light spreading outward as fading rings
-    const fade = Math.max(0, 1-ease);
-    const r1 = rp.maxR * ease;
-    const r2 = rp.maxR * Math.max(0, ease-0.14);
-    strokeRipple(glowCtx, rp.x, rp.y, r1, rp.c1, Math.min(1, fade*1.3));
-    if(r2 > 2) strokeRipple(glowCtx, rp.x, rp.y, r2, rp.c2, Math.min(1, fade*0.85));
   }
 
   // ---------------------------------------------------------------
@@ -738,7 +814,8 @@
       && v.count === state.count
       && v.speed === state.speed
       && v.size === state.size
-      && v.glow === state.glow;
+      && v.glow === state.glow
+      && v.backdropIndex === state.backdropIndex;
   }
   function renderSceneGrid(){
     sceneGrid.innerHTML = '';
@@ -752,6 +829,33 @@
     });
   }
   renderSceneGrid();
+
+  // ---------------------------------------------------------------
+  // UI: background presets
+  // ---------------------------------------------------------------
+  const backdropEl = document.getElementById('backdrop');
+  const backdropGrid = document.getElementById('backdropGrid');
+  function applyBackdrop(){
+    backdropEl.style.background = BACKDROPS[state.backdropIndex].css;
+  }
+  function renderBackdropGrid(){
+    backdropGrid.innerHTML = '';
+    BACKDROPS.forEach((bg,i)=>{
+      const btn = document.createElement('div');
+      btn.className = 'palette-btn' + (i===state.backdropIndex ? ' active' : '');
+      btn.style.background = bg.css;
+      btn.innerHTML = `<span>${bg.name}</span>`;
+      btn.onclick = ()=>{
+        state.backdropIndex = i;
+        applyBackdrop();
+        renderBackdropGrid();
+        renderSceneGrid();
+      };
+      backdropGrid.appendChild(btn);
+    });
+  }
+  applyBackdrop();
+  renderBackdropGrid();
 
   // ---------------------------------------------------------------
   // UI: sliders
